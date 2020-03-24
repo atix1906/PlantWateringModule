@@ -14,12 +14,15 @@ float moistureValue = 0;
 double moisPercent = 0;
 int maxValue = 600;
 
+String programStatus = "measure";
+
 const int waterPump = 5;
 const int sensorInput = 0;
 const int sensorOnOff = 4;
 
 bool waterGo = false;
 bool debug = true;
+
 
 EspMQTTClient client(
   GlobalConstants::ssid,
@@ -81,7 +84,7 @@ void goingToSleep(){
   
   Serial.println("going to deepsleep");
   delay(100);
-  ESP.deepSleep(20e6);
+  ESP.deepSleep(10e6);
   yield();
 }
 
@@ -119,7 +122,7 @@ void loop() {
   if(debug){
     Serial.println(cnt);
   }
-  if(cnt < 30){
+  if(cnt < 20){
     moistureSensorOn();
     moistureValue = analogRead(sensorInput);
     if (moistureValue > maxValue){
@@ -148,11 +151,15 @@ void loop() {
       waterGo = true;
     } 
     else if (moisPercent >=20 && moisPercent <40){
+      waterGo = false;
+      cnt = 140;
       if(debug){
         Serial.println("I will be thirsty soon.");
       }
     }
     else{
+      waterGo = false;
+      cnt = 140;
       if(debug){
         Serial.println("I'm good, thanks for asking!");
       }
@@ -160,7 +167,7 @@ void loop() {
   }
 
   if(waterGo){
-    if(cnt < 80){
+    if(cnt < 120){
       startTheWaterFlow();
     }
     else{
@@ -168,9 +175,43 @@ void loop() {
     }
   }
 
-  if(cnt > 110){
+  if(cnt > 130){
     goingToSleep();
   }
+
+
+  /*switch(programStatus){
+    case "measure":
+      moistureSensorOn();
+      moistureValue = analogRead(sensorInput);
+      if (moistureValue > maxValue){
+        maxValue = moistureValue;
+      }
+
+      if(cnt < 20){
+        programStatus = 
+      }
+      if(debug){
+        Serial.print("\nmoisture Value: ");
+        Serial.print(moistureValue);
+        Serial.print("\tmax Value: ");
+        Serial.println(maxValue);
+      }
+      break;
+    case "evaluate":
+      
+      break;
+    case "high":
+      break;
+    case "middle":
+      break;
+    case "low":
+      break;
+    case "water":
+      break;
+    case "sleep":
+  }*/
+  
   cnt++;
   delay(100);
 }
