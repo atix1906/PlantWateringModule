@@ -14,15 +14,19 @@ float moistureValue = 0;
 double moisPercent = 0;
 int maxValue = 600;
 
-String programStatus = "measure";
+int programStatus = 0;
 
 const int waterPump = 5;
 const int sensorInput = 0;
 const int sensorOnOff = 4;
 
-bool waterGo = false;
-bool debug = true;
+const int oneMinute = 60e6;
+const int tenMinutes = oneMinute * 10;
+const int oneHour = oneMinute * 60;  
 
+bool debug = false;
+
+String statusMsg = "";
 
 EspMQTTClient client(
   GlobalConstants::ssid,
@@ -46,6 +50,7 @@ void setup()
   pinMode(waterPump,OUTPUT);
   pinMode(sensorInput,INPUT);
   pinMode(sensorOnOff,OUTPUT);
+
   if(debug){
     client.enableDebuggingMessages(); //Enable debugging messages sent to serial output
   }
@@ -68,23 +73,15 @@ void onConnectionEstablished()
      
   // Publish a message to "Briefkasten/test"
   client.publish("PlantWatering/status", "PlantWatering is connected",true); // You can activate the retain flag by setting the third parameter to true
-  
-  // Execute delayed instructions
-  /*client.executeDelayed(5 * 1000, []() {
-    client.publish("PlantWatering/status", "Not sure what to say yet!");
-    counter = 0;
-  });*/
-
-   //client.publish("PlantWatering/test", "loop",true); // You can activate the retain flag by setting the third parameter to true
 }
 
-void goingToSleep(){
+void goingToSleep(int sleepTime){
   yield();
-  //setOutputPins();
-  
-  Serial.println("going to deepsleep");
+  if(debug){
+    Serial.println("going to deepsleep");  
+  }
   delay(100);
-  ESP.deepSleep(10e6);
+  ESP.deepSleep(sleepTime);
   yield();
 }
 
@@ -113,105 +110,106 @@ void moistureSensorOff(){
 void sendData(double data){
   String output = "";
   output = String(data,2);
-  client.publish("PlantWatering/data", output); // You can activate the retain flag by setting the third parameter to true
+  client.publish("PlantWatering/moisturePercentage", output); // You can activate the retain flag by setting the third parameter to true
+}
+
+void sendStatus(String data){
+  client.publish("PlantWatering/waterStatus", data); // You can activate the retain flag by setting the third parameter to true
 }
 
 
 void loop() {
   client.loop();
+  if(client.isConnected()){
+    cnt = 0;
+    switch(programStatus){
+      case 0:   // "measure"
+        moistureSensorOn();
+        for(int i = 0; i<20; i++){
+          moistureValue = analogRead(sensorInput);
+          if (moistureValue > maxValue){
+            maxValue = moistureValue;
+          }  
+          delay(100);
+        }
+        
+        moistureSensorOff();      
+        if(debug){
+          Serial.print("\nmoisture Value: ");
+          Serial.print(moistureValue);
+          Serial.print("\tmax Value: ");
+          Serial.println(maxValue);
+        }
+        programStatus = 10;
+        break;
+      case 10:    //"evaluate"
+        moisPercent = (moistureValue/maxValue)*100.0;
+        if(debug){
+          Serial.print("\tProzent: ");
+          Serial.print(moisPercent);
+          Serial.println();
+        }
+        sendData(moisPercent);
+        if(moisPercent < 20){
+          programStatus = 40;
+        } 
+        else if (moisPercent >=20 && moisPercent <40){
+          programStatus = 30;
+        }
+        else{
+          if(debug){
+            Serial.println("I'm good, thanks for asking!");
+          }
+          programStatus = 20;
+        }
+        break;
+      case 20:    //"waterLevelHigh"
+        statusMsg = "I'm good, thanks for asking!";
+        sendStatus(statusMsg);
+        if(debug){
+          Serial.println(statusMsg);
+        }
+        programStatus = 70;
+        break;
+      case 30:    //"waterLevelMedium"
+        statusMsg = "I will be thirsty soon.";
+        sendStatus(statusMsg);
+        if(debug){
+          Serial.println(statusMsg);
+        }
+        programStatus = 70;
+        break;
+      case 40:    //"waterLevelLow"
+        statusMsg = "Water...I need water....";
+        sendStatus(statusMsg);
+        if(debug){
+          Serial.println(statusMsg);
+        }
+        programStatus = 50;
+        break;
+      case 50:    //"waterPumpStart"
+          startTheWaterFlow();
+          delay(10000); // 10 seconds
+          programStatus = 60;
+        break;
+      case 60:    //"waterPumpStop"
+        stopTheWaterFlow();
+        programStatus = 70;
+        break;
+      case 70:  //"sleep"
+        goingToSleep(oneHour);
+        break;
+      default:
+      break;
+    }
+    
+  }
+  else if(cnt > 100){
+    goingToSleep(tenMinutes);
+  }
   if(debug){
-    Serial.println(cnt);
+    Serial.println(cnt);  
   }
-  if(cnt < 20){
-    moistureSensorOn();
-    moistureValue = analogRead(sensorInput);
-    if (moistureValue > maxValue){
-      maxValue = moistureValue;
-    }
-    if(debug){
-      Serial.print("\nmoisture Value: ");
-      Serial.print(moistureValue);
-      Serial.print("\tmax Value: ");
-      Serial.println(maxValue);
-    }
-  }
-  else{
-    moistureSensorOff();
-    moisPercent = (moistureValue/maxValue)*100.0;
-    if(debug){
-      Serial.print("\tProzent: ");
-      Serial.print(moisPercent);
-      Serial.println();
-    }
-    sendData(moisPercent);
-    if(moisPercent < 20){
-      if(debug){
-        Serial.println("Water...I need water....");
-      }
-      waterGo = true;
-    } 
-    else if (moisPercent >=20 && moisPercent <40){
-      waterGo = false;
-      cnt = 140;
-      if(debug){
-        Serial.println("I will be thirsty soon.");
-      }
-    }
-    else{
-      waterGo = false;
-      cnt = 140;
-      if(debug){
-        Serial.println("I'm good, thanks for asking!");
-      }
-    }
-  }
-
-  if(waterGo){
-    if(cnt < 120){
-      startTheWaterFlow();
-    }
-    else{
-      stopTheWaterFlow();
-    }
-  }
-
-  if(cnt > 130){
-    goingToSleep();
-  }
-
-
-  /*switch(programStatus){
-    case "measure":
-      moistureSensorOn();
-      moistureValue = analogRead(sensorInput);
-      if (moistureValue > maxValue){
-        maxValue = moistureValue;
-      }
-
-      if(cnt < 20){
-        programStatus = 
-      }
-      if(debug){
-        Serial.print("\nmoisture Value: ");
-        Serial.print(moistureValue);
-        Serial.print("\tmax Value: ");
-        Serial.println(maxValue);
-      }
-      break;
-    case "evaluate":
-      
-      break;
-    case "high":
-      break;
-    case "middle":
-      break;
-    case "low":
-      break;
-    case "water":
-      break;
-    case "sleep":
-  }*/
-  
   cnt++;
   delay(100);
 }
